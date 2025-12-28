@@ -1,0 +1,295 @@
+# Setting Up Local Vibium Dev (x86 Windows)
+
+> **Draft**: This doc has not been tested yet. Instructions may need adjustment.
+
+This doc covers Windows VM setup on an x86 Windows host for isolated development.
+
+For other platforms, see:
+- [macOS Setup](local-dev-setup-mac.md) — for macOS VM on Mac host
+- [Linux x86 Setup](local-dev-setup-x86-linux.md) — for Linux VM on x86 Linux host
+
+---
+
+## Why Develop Inside a Virtual Machine?
+
+When using AI-assisted tools like Claude Code, it's important to limit the "blast radius" of what the AI can access or modify. A VM provides hard boundaries:
+
+- **Containment**: The AI can only see/modify files inside the VM — not your host machine, personal files, or other projects
+- **Scoped credentials**: GitHub PATs and API keys are isolated to the VM and scoped to specific repos
+- **Easy reset**: If something goes wrong, you can restore from a checkpoint or rebuild the VM from scratch
+- **Reproducible environment**: Every developer starts from the same clean slate
+- **Peace of mind**: You can let the AI operate more freely without worrying about unintended side effects
+
+This isn't about distrust — it's defense in depth. The same reason you don't run untested code as admin.
+
+---
+
+## Hardware
+
+See [Linux x86 Setup](local-dev-setup-x86-linux.md#hardware) for hardware recommendations.
+
+---
+
+## Host Setup
+
+### Install Windows 11 Pro
+
+Standard Windows 11 Pro install on the mini PC. Pro edition is required for Hyper-V.
+
+### Enable Hyper-V
+
+1. Open PowerShell as Administrator
+2. Run:
+
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
+```
+
+3. Restart when prompted
+
+### Enable SSH on Host (for remote access)
+
+```powershell
+# Run as Administrator
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+
+# Get IP address
+ipconfig
+```
+
+---
+
+## Create Windows VM (Guest)
+
+### Download Windows ISO
+
+Download Windows 11 ISO from Microsoft: https://www.microsoft.com/software-download/windows11
+
+### Create VM with Hyper-V Manager
+
+1. Open Hyper-V Manager
+2. Action → New → Virtual Machine
+3. Configure:
+   - Name: `vibium-dev`
+   - Generation: Generation 2
+   - Memory: 4GB minimum (8GB recommended), enable Dynamic Memory
+   - Network: Default Switch
+   - Virtual Hard Disk: 64GB minimum
+4. Install Options: select Windows ISO
+5. Finish and start installation
+
+### VM Settings (before first boot)
+
+Right-click VM → Settings:
+- Security: Disable Secure Boot (or set to "Microsoft UEFI Certificate Authority")
+- Processor: 4 virtual processors
+- Checkpoints: Enable (for snapshots)
+
+### Install Windows in VM
+
+Standard Windows 11 install. Use a local account for simplicity.
+
+---
+
+## Inside the VM
+
+**All commands below are run inside the VM.**
+
+---
+
+## Install Windows Terminal
+
+Open Microsoft Store, search for "Windows Terminal", install it.
+
+---
+
+## Enable Developer Mode
+
+Settings → Privacy & Security → For developers → Developer Mode: On
+
+---
+
+## Enable OpenSSH Server
+
+```powershell
+# Run as Administrator
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+
+# Set PowerShell as default SSH shell
+New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force
+```
+
+Get VM IP:
+```powershell
+ipconfig
+```
+
+---
+
+## Install Dev Tools (via winget)
+
+Windows 11 includes `winget` by default. Open PowerShell:
+
+```powershell
+winget install Git.Git
+winget install GitHub.cli
+winget install BurntSushi.ripgrep.MSVC
+winget install jqlang.jq
+```
+
+Restart terminal after installing Git.
+
+---
+
+## Install Go
+
+```powershell
+winget install GoLang.Go
+```
+
+Restart terminal, then verify:
+```powershell
+go version
+```
+
+---
+
+## Install Node.js
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+Restart terminal, then verify:
+```powershell
+node --version
+npm --version
+```
+
+---
+
+## Install Claude Code
+
+```powershell
+npm install -g @anthropic-ai/claude-code
+```
+
+---
+
+## Git Config
+
+```powershell
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+git config --global core.autocrlf input
+```
+
+---
+
+## Clone the Repo
+
+```powershell
+mkdir C:\Projects
+cd C:\Projects
+git clone https://github.com/VibiumDev/vibium.git
+cd vibium
+```
+
+---
+
+## Create a GitHub Personal Access Token (PAT)
+
+In a browser:
+
+1. GitHub → Settings → Developer settings
+2. Personal access tokens → Fine-grained tokens
+3. Generate new token
+
+Token settings:
+- Token name: `windows-vm` (or whatever identifies this VM)
+- Expiration: 7 days (or 30 if you prefer)
+- Repository access: Only select repositories → `VibiumDev/vibium`
+
+Permissions:
+- Contents: Read and write
+- Everything else: No access
+
+---
+
+## Authenticate with GitHub
+
+```powershell
+gh auth login
+# Follow prompts, paste your PAT when prompted
+```
+
+---
+
+## Connect from Host to VM
+
+### Via Terminal (on host)
+
+```powershell
+ssh yourusername@<vm-ip>
+```
+
+### Via Zed (on host)
+
+1. Install Zed: `winget install Zed.Zed` or download from https://zed.dev
+2. Open Zed
+3. `Ctrl+Shift+P` → "remote projects: Open Remote Project"
+4. Enter: `yourusername@<vm-ip>`
+5. Navigate to `C:\Projects\vibium`
+
+---
+
+## Build and Test
+
+```powershell
+cd C:\Projects\vibium\clicker
+go build -o bin\clicker.exe .\cmd\clicker
+.\bin\clicker.exe --version
+.\bin\clicker.exe paths
+.\bin\clicker.exe install
+.\bin\clicker.exe launch-test
+```
+
+---
+
+## Checkpoints (Snapshots)
+
+Take VM checkpoints before risky operations:
+
+1. Open Hyper-V Manager
+2. Right-click VM → Checkpoint
+3. Name it (e.g., "Fresh dev setup")
+
+To restore:
+1. Right-click checkpoint → Apply
+2. Or right-click → Revert to restore to most recent
+
+---
+
+## Tips
+
+### Path Length
+
+Windows has a 260-character path limit by default. Enable long paths:
+
+```powershell
+# Run as Administrator
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+```
+
+### Windows Defender Exclusions
+
+Defender can slow down builds. Add exclusions:
+
+1. Windows Security → Virus & threat protection → Manage settings
+2. Exclusions → Add or remove exclusions
+3. Add folder: `C:\Projects`
+4. Add folder: `C:\Users\<you>\go`
